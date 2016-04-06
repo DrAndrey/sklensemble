@@ -51,35 +51,38 @@ class BlendingClassifier(BaseEstimator, ClassifierMixin):
         y = y.iloc[:, 0]
         return y.values
 
-    def predict_proba(self, x):
+    def _predict_proba(self, x):
         predictions = [estimator.predict_proba(x) if x_mask is None else estimator.predict_proba(x[:, x_mask])
                        for estimator, x_mask in zip(self.estimators, self.x_mask)]
         panel = pd.Panel(predictions)
-        return panel.values
+        return panel
+
+    def predict_proba(self, x):
+        panel = self._predict_proba(x)
+        return panel.mean(axis=0).values
 
     def predict_optimized_proba(self, x_train, y_train, x_test):
         classes = np.unique(y_train)
         assert (classes == np.array(range(len(classes)))).all()
 
         n_est = len(self.estimators)
-        train_proba = self.predict_proba(x_train)
+        train_proba = self._predict_proba(x_train).values
 
         train_pred_class_proba = []
         for sample_ind, sample_class in enumerate(y_train):
             train_pred_class_proba.append(train_proba[:, sample_ind, sample_class])
-        train_pred_class_proba = np.array(train_pred_class_proba).mean() / n_est
+        train_pred_class_proba = np.array(train_pred_class_proba).mean(axis=0)
 
         opt_fun = lambda x: (1 - (np.array(x) * train_pred_class_proba).sum()) ** 2
         first_w = np.ones(n_est) / n_est
 
-        opt_w = optimize.minimize(opt_fun, tuple(first_w)).x
+        bounds = [[0, 1]] * n_est
+        constraints = {"type": "eq", "fun": lambda x: np.array(x).sum() - 1}
+        opt_w = optimize.minimize(opt_fun, tuple(first_w), bounds=bounds, constraints=constraints).x
         print("simple_mean_acc - {0}, opt_weighted_mean_acc - {1}, opt_weights - {2}".format(opt_fun(first_w),
                                                                                              opt_fun(opt_w), opt_w))
-        y_test = self.predict(x_test)
-        test_proba = self.predict_proba(x_test)
-        test_pred_class_proba = []
-        for sample_ind, sample_class in enumerate(y_test):
-            test_pred_class_proba.append((test_proba[:, sample_ind, sample_class]*opt_w).sum())
+        test_proba = self._predict_proba(x_test).values
+        test_pred_class_proba = np.tensordot(test_proba, opt_w, axes=((0), (0)))
         return test_pred_class_proba
 
 if __name__ == '__main__':
