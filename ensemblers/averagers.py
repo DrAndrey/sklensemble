@@ -57,9 +57,12 @@ class BlendingClassifier(BaseEstimator, ClassifierMixin):
         panel = pd.Panel(predictions)
         return panel
 
-    def predict_proba(self, x):
+    def predict_proba(self, x, av_type="mean"):
         panel = self._predict_proba(x)
-        return panel.mean(axis=0).values
+        if av_type == "mean":
+            return panel.mean(axis=0).values
+        else:
+            return np.power(panel.product(axis=0).values, 1 / len(self.estimators))
 
     def predict_optimized_proba(self, x_train, y_train, x_test):
         classes = np.unique(y_train)
